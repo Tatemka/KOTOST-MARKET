@@ -1,0 +1,12 @@
+# База данных
+*.db
+*.db-wal
+*.db-shm
+*.db.backup
+
+# Логи
+*.log
+
+# Секреты
+.env
+config.py
