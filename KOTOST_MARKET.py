@@ -4,7 +4,7 @@ import socket
 @event.start
 def on_start():
     cyberpi.console.clear()
-    cyberpi.wifi.connect("YourBannyWrote_2.4G", "PINkerton26K")
+    cyberpi.wifi.connect("ВАШ_WIFI", "ВАШ_ПАРОЛЬ")
     time.sleep(5)
     if cyberpi.wifi.is_connected():
         cyberpi.console.print("Готов!")
@@ -18,8 +18,8 @@ def is_btn_press():
     
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        client.connect(("192.168.1.140", 5051))
-        client.send("ЗАКАЗ КОТОСТИ".encode('utf-8'))
+        client.connect(("IP_ВАШЕГО_СЕРВЕРА", 5051))
+        client.send("ТОКЕН_ИЗ_kot_final.py:ЗАКАЗ КОТОСТИ".encode('utf-8'))
         cyberpi.console.print("OK!")
     except Exception as e:
         cyberpi.console.print("Err: " + str(e)) # Покажет текст ошибки
