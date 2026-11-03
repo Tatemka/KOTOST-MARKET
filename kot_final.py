@@ -8,12 +8,16 @@ import sqlite3
 # === НАСТРОЙКИ ===
 PORT_CYBERPI = 5051
 PORT_OLD = 5050
-NTFY_URL = "http://ВАШ_IP/kotost-market" 
+NTFY_URL = "http://ВАШ СЕРВЕР/kotost-market" 
 DB_PATH = "/home/dietpi/kotost.db"
 
-# === БАЗА ДАННЫХ ===
+# === СЕКРЕТНЫЙ ТОКЕН (придумай свой!) ===
+SECRET_TOKEN = "ВАШ_ТОКЕН"
+
+# === БАЗА ДАННЫХ (с WAL) ===
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute('PRAGMA journal_mode=WAL;')
     cursor = conn.cursor()
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS orders (
@@ -35,17 +39,11 @@ def send_notification(title, message):
         response = requests.post(
             f"{NTFY_URL}?title={safe_title}",
             data=message.encode('utf-8'),
-            headers={
-                "Priority": "high",
-                "Tags": "cat",
-                "Content-Type": "text/plain; charset=utf-8"
-            },
+            headers={"Priority": "high", "Tags": "cat", "Content-Type": "text/plain; charset=utf-8"},
             timeout=5
         )
         if response.status_code == 200:
             print(f"[{time.strftime('%H:%M:%S')}] Уведомление отправлено: {message}")
-        else:
-            print(f"[ОШИБКА NTFY] Код {response.status_code}: {response.text}")
     except Exception as e:
         print(f"[ОШИБКА NTFY] {e}")
 
@@ -55,31 +53,33 @@ def handle_client(conn, addr):
     try:
         data = conn.recv(1024).decode('utf-8').strip()
         if data:
-            print(f"[{time.strftime('%H:%M:%S')}] Получено: {data}")
+            # === ПРОВЕРКА ТОКЕНА ===
+            if not data.startswith(SECRET_TOKEN + ":"):
+                print(f"[!] ОТКАЗАНО: Неверный токен от {addr[0]}. Данные: {data[:20]}...")
+                conn.sendall(b"ERROR: INVALID_TOKEN\n")
+                return
             
-            # 1. Отправляем уведомление
-            send_notification("КОТОСТЬ МАРКЕТ", data)
+            # Отрезаем токен, получаем чистый текст заказа
+            order_text = data.replace(SECRET_TOKEN + ":", "")
+            print(f"[{time.strftime('%H:%M:%S')}] Получено: {order_text}")
             
-            # 2. Записываем в базу данных и делаем полную очистку при лимите
+            send_notification("КОТОСТЬ МАРКЕТ", order_text)
+            
             try:
-                cursor = db_conn.cursor()
+                conn_db = sqlite3.connect(DB_PATH, timeout=10)
+                conn_db.execute('PRAGMA journal_mode=WAL;')
+                cursor = conn_db.cursor()
                 
-                # Считаем, сколько сейчас заказов
                 cursor.execute("SELECT COUNT(*) FROM orders")
                 count = cursor.fetchone()[0]
                 
-                # Если уже 20 (или больше), полностью очищаем базу
                 if count >= 20:
                     cursor.execute("DELETE FROM orders")
-                    print(f"[БД] Лимит 20 заказов достигнут. База полностью очищена!")
+                    print(f"[БД] Лимит 20 достигнут. База очищена!")
                 
-                # Добавляем новый заказ
-                cursor.execute(
-                    "INSERT INTO orders (message, ip_address) VALUES (?, ?)", 
-                    (data, addr[0])
-                )
-                
-                db_conn.commit()
+                cursor.execute("INSERT INTO orders (message, ip_address) VALUES (?, ?)", (order_text, addr[0]))
+                conn_db.commit()
+                conn_db.close()
                 print(f"[БД] Заказ сохранён.")
             except Exception as db_err:
                 print(f"[ОШИБКА БД] {db_err}")
@@ -107,15 +107,12 @@ def run_server(port):
 
 if __name__ == "__main__":
     print(f"[✓] Уведомления идут на {NTFY_URL}")
-    
-    # Запускаем два сервера в разных потоках
+    print(f"[✓] Токен для CyberPi: {SECRET_TOKEN}")
     threading.Thread(target=run_server, args=(PORT_CYBERPI,), daemon=True).start()
     threading.Thread(target=run_server, args=(PORT_OLD,), daemon=True).start()
 
-    # Бесконечный цикл, чтобы программа не закрывалась
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n[!] Остановка сервера...")
-        db_conn.close()
